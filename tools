@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Standard versions
+kubectl_version="1.20.7"
+helm_version="3.6.2"
+terraform_version="0.14.2"
+
+# Determine whether host OS is Linux or Mac
+os=$(uname -s | awk '{print tolower($0)}')
+
+log() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&1
+}
+
+err() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
+}
+
+helm_repo_check() {
+  log "Going to add any helm repos you need..."
+  helm repo add bitnami https://charts.bitnami.com/bitnami
+  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+}
+
+install_kubectl() {
+  curl -LO \
+    "https://storage.googleapis.com/kubernetes-release/release/v${kubectl_version}/bin/${os}/amd64/kubectl"
+  chmod +x "./kubectl"
+  sudo mv "./kubectl" /usr/local/bin/kubectl
+}
+
+install_helm() {
+  curl -LO \
+    "https://get.helm.sh/helm-v${helm_version}-${os}-amd64.tar.gz"
+  tar -xf "helm-v${helm_version}-${os}-amd64.tar.gz" "${os}-amd64/helm"
+  chmod +x "./${os}-amd64/helm"
+  sudo mv "./${os}-amd64/helm" /usr/local/bin/helm
+  rm -rf "./${os}-amd64/"
+  rm "helm-v${helm_version}-${os}-amd64.tar.gz"
+}
+
+install_terraform() {
+  curl -LO \
+    "https://releases.hashicorp.com/terraform/${terraform_version}/terraform_${terraform_version}_${os}_amd64.zip"
+  unzip "terraform_${terraform_version}_${os}_amd64.zip"
+  chmod +x "./terraform"
+  sudo mv "./terraform" /usr/local/bin/terraform
+  rm "terraform_${terraform_version}_${os}_amd64.zip"
+}
+
+main() {
+
+  # List of tools that need installed or updated
+  local tool_list=()
+
+  # These blocks check for existing installs and correct versioning
+  log "Checking what's already installed..."
+
+  if command -v kubectl &> /dev/null ; then
+    if [[ "$(kubectl version --client --short=true | awk '{print $3}')" != "v${kubectl_version}" ]]; then
+      tool_list+=("kubectl")
+    fi
+  else
+    tool_list+=("kubectl")
+  fi
+
+  if command -v helm &> /dev/null ; then
+    if [[ "$(helm version --short=true | awk -F'+' '{print $1}')" != "v${helm_version}" ]]; then
+      tool_list+=("helm")
+    fi
+  else
+    tool_list+=("helm")
+  fi
+
+  if command -v terraform &> /dev/null ; then
+    if [[ "$(terraform version | awk 'NR==1{print $2}')" != "v${terraform_version}" ]]; then
+      tool_list+=("terraform")
+    fi
+  else
+    tool_list+=("terraform")
+  fi
+
+  # If tools are present on the list, run installation function for each
+  if (( ${#tool_list[@]} )); then
+    log "Looks like we need to update your tools. One moment..."
+    for tool in "${tool_list[@]}"; do
+      if ! install_"${tool}"; then
+        err "${tool} installation failed! Check error output and try again."
+      else
+        log "Successfully installed ${tool}!"
+      fi
+    done
+    helm_repo_check
+    log "All installation attempts complete! If anything failed, check error output."
+  else
+    helm_repo_check
+    log "Your tools look good!"
+  fi
+}
+
+main "$@"
